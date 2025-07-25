@@ -12,3 +12,8 @@ A simple tool for converting images between different formats.
 ## Usage
 
 1. Clone the repository:
+2. Create a virtual environment: python -m venv venv
+3. Activate the virtual environment (Windows): venv\Scripts\activate
+4. Install the requirements: pip install -r requirements.txt
+5. Run the converter: python main.py
+
