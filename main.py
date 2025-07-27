@@ -6,13 +6,30 @@ import pillow_heif
 from collections import defaultdict
 from tqdm import tqdm  # For progress bar
 import hashlib
+import shutil
+from datetime import datetime
 
 class ImageConverter:
     SUPPORTED_TYPES = ['.jpg', '.jpeg', '.png', '.heic', '.tiff']
 
     def __init__(self, src_root: str, dest_root: str):
-        self.src_root = Path(src_root)
-        self.dest_root = Path(dest_root)
+        try:
+            self.src_root = Path(r'W:\Organized')
+            if not self.src_root.exists():
+                raise FileNotFoundError(f"Source folder does not exist: {self.src_root}")
+            print(f"Source folder is set to: {self.src_root}")
+        except Exception as e:
+            print(f"Error setting source folder: {e}")
+            raise
+        try:
+            self.dest_root = Path(r'W:\Convert to Jpeg')
+            if not self.dest_root.exists():
+                print(f"Destination folder does not exist: {self.dest_root}")
+            else:
+                print(f"Destination folder is set to: {self.dest_root}")
+        except Exception as e:
+            print(f"Error setting destination folder: {e}")
+            raise
 
     # --- Directory and File Listing ---
     def validate_directories(self):
@@ -192,6 +209,42 @@ class ImageConverter:
         with open(log_file, 'w') as f:
             for line in results:
                 f.write(line + '\n')
+
+    def move_images_to_date_folders(self):
+        """
+        Move images not in YYYY/mm folders into folders by their taken date (EXIF DateTimeOriginal).
+        """
+        for file_path in self.src_root.rglob('*'):
+            if not file_path.is_file() or file_path.suffix.lower() not in self.SUPPORTED_TYPES:
+                continue
+            # Check if already in YYYY/mm
+            parts = file_path.relative_to(self.src_root).parts
+            if len(parts) >= 2 and parts[0].isdigit() and len(parts[0]) == 4 and parts[1].isdigit() and len(parts[1]) == 2:
+                continue  # Already in correct folder
+
+            # Try to get date taken
+            try:
+                img = Image.open(file_path)
+                exif = img._getexif()
+                date_str = None
+                if exif:
+                    date_str = exif.get(36867) or exif.get(306)  # 36867: DateTimeOriginal, 306: DateTime
+                if not date_str:
+                    print(f"Skipping (no date): {file_path}")
+                    continue
+                date_obj = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                year = str(date_obj.year)
+                month = f"{date_obj.month:02d}"
+                target_folder = self.src_root / year / month
+                target_folder.mkdir(parents=True, exist_ok=True)
+                target_path = target_folder / file_path.name
+                if target_path.exists():
+                    print(f"Target exists, skipping: {target_path}")
+                    continue
+                shutil.move(str(file_path), str(target_path))
+                print(f"Moved: {file_path} -> {target_path}")
+            except Exception as e:
+                print(f"Error processing {file_path}: {e}")
 
 # Example usage:
 converter = ImageConverter('Organized', 'Organized_jpeg')
