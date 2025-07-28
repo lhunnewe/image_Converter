@@ -8,9 +8,18 @@ from tqdm import tqdm  # For progress bar
 import hashlib
 import shutil
 from datetime import datetime
+from hachoir.parser import createParser
+from hachoir.metadata import extractMetadata
+import ffmpeg
+from typing import Optional
 
 class ImageConverter:
-    SUPPORTED_TYPES = ['.jpg', '.jpeg', '.png', '.heic', '.tiff']
+    SUPPORTED_TYPES = [
+        '.jpg', '.jpeg', '.png', '.heic', '.tiff',  # Images
+        '.mov', '.mp4', '.mts',  # Videos
+        '.gif'  # Animated images
+    ]
+    EXCLUDED_PATHS = ['.dtrash']  # Add this line
 
     def __init__(self, src_root: str, dest_root: str):
         try:
@@ -40,31 +49,80 @@ class ImageConverter:
 
     def list_supported_files(self):
         """Return a list of all supported files in the source directory."""
-        return [p for p in self.src_root.rglob('*') if p.is_file() and p.suffix.lower() in self.SUPPORTED_TYPES]
+        return [p for p in self.src_root.rglob('*') 
+                if p.is_file() 
+                and p.suffix.lower() in self.SUPPORTED_TYPES
+                and not self.is_excluded_path(p)]
 
     # --- Reporting ---
-    def report_file_types_by_year(self):
+    def report_file_types_by_year(self, show_files=10, save_report=True):
         """
-        Prints a report of the count of all file types by year based on folder structure.
-        Assumes structure: root/YYYY/mm/images
+        Prints a report of the count of all file types by year.
+        Args:
+            show_files (int): Number of unknown files to show in console output
+            save_report (bool): Whether to save full report to a file
         """
         counts = defaultdict(lambda: defaultdict(int))
+        unknown_files = []
+        
         for file_path in self.src_root.rglob('*'):
-            if file_path.is_file():
+            if file_path.is_file() and not self.is_excluded_path(file_path):
+                # Try folder structure first
                 parts = file_path.relative_to(self.src_root).parts
+                year = None
+                
                 if len(parts) >= 1 and parts[0].isdigit() and len(parts[0]) == 4:
                     year = parts[0]
                 else:
+                    # Try EXIF data
+                    try:
+                        if file_path.suffix.lower() in self.SUPPORTED_TYPES:
+                            img = Image.open(file_path)
+                            exif = img._getexif()
+                            if exif:
+                                date_str = exif.get(36867) or exif.get(306)
+                                if date_str:
+                                    year = datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S").strftime("%Y")
+                    except:
+                        pass
+                        
+                if not year:
                     year = 'Unknown'
+                    unknown_files.append(str(file_path))
+                    
                 ext = file_path.suffix.lower()
                 counts[year][ext] += 1
 
-        print("File type counts by year:")
+        print("\nFile type counts by year:")
         for year in sorted(counts):
-            print(f"Year: {year}")
+            print(f"\nYear: {year}")
             for ext, count in counts[year].items():
                 print(f"  {ext}: {count}")
-            print()
+                
+        if unknown_files:
+            # Count unknown files by type
+            unknown_by_type = defaultdict(int)
+            for f in unknown_files:
+                ext = Path(f).suffix.lower()
+                unknown_by_type[ext] += 1
+                
+            print("\nUnknown files by type:")
+            for ext, count in sorted(unknown_by_type.items()):
+                print(f"  {ext}: {count}")
+                
+            print(f"\nShowing first {show_files} of {len(unknown_files)} unknown files:")
+            for f in unknown_files[:show_files]:
+                print(f"  {f}")
+            if len(unknown_files) > show_files:
+                print(f"  ... and {len(unknown_files) - show_files} more files")
+                
+            if save_report:
+                report_file = "unknown_files_report.txt"
+                with open(report_file, 'w') as f:
+                    f.write("Files with unknown years:\n")
+                    for file in unknown_files:
+                        f.write(f"{file}\n")
+                print(f"\nFull list saved to: {report_file}")
 
     def report_duplicates(self):
         """Detect and report duplicate images by hash."""
@@ -163,7 +221,9 @@ class ImageConverter:
     def convert_all(self):
         """Convert all supported files without progress bar or EXIF logging."""
         for src_path in self.src_root.rglob('*'):
-            if src_path.is_file() and src_path.suffix.lower() in self.SUPPORTED_TYPES:
+            if (src_path.is_file() 
+                and src_path.suffix.lower() in self.SUPPORTED_TYPES
+                and not self.is_excluded_path(src_path)):
                 rel_path = src_path.relative_to(self.src_root)
                 dest_path = self.dest_root / rel_path.with_suffix('.jpg')
                 dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -215,7 +275,9 @@ class ImageConverter:
         Move images not in YYYY/mm folders into folders by their taken date (EXIF DateTimeOriginal).
         """
         for file_path in self.src_root.rglob('*'):
-            if not file_path.is_file() or file_path.suffix.lower() not in self.SUPPORTED_TYPES:
+            if (not file_path.is_file() 
+                or file_path.suffix.lower() not in self.SUPPORTED_TYPES
+                or self.is_excluded_path(file_path)):
                 continue
             # Check if already in YYYY/mm
             parts = file_path.relative_to(self.src_root).parts
@@ -245,6 +307,100 @@ class ImageConverter:
                 print(f"Moved: {file_path} -> {target_path}")
             except Exception as e:
                 print(f"Error processing {file_path}: {e}")
+
+    def is_excluded_path(self, path: Path) -> bool:
+        """Check if the path contains any excluded directory names."""
+        return any(excluded in path.parts for excluded in self.EXCLUDED_PATHS)
+
+    def get_file_date(self, file_path: Path) -> Optional[datetime]:
+        """Get creation date from file metadata."""
+        ext = file_path.suffix.lower()
+        
+        # Handle images
+        if ext in ['.jpg', '.jpeg', '.png', '.tiff', '.gif']:
+            try:
+                img = Image.open(file_path)
+                exif = img._getexif()
+                if exif:
+                    date_str = exif.get(36867) or exif.get(306)  # 36867: DateTimeOriginal, 306: DateTime
+                    if date_str:
+                        return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+            except Exception as e:
+                print(f"Error reading image EXIF: {e}")
+        
+        # Handle HEIC
+        elif ext == '.heic':
+            try:
+                heif_file = pillow_heif.read_heif(str(file_path))
+                exif = heif_file.metadata.get('exif')
+                if exif:
+                    return datetime.strptime(exif.get('DateTimeOriginal'), "%Y:%m:%d %H:%M:%S")
+            except Exception as e:
+                print(f"Error reading HEIC metadata: {e}")
+        
+        # Handle video files
+        elif ext in ['.mov', '.mp4', '.mts']:
+            try:
+                # Try ffmpeg first
+                probe = ffmpeg.probe(str(file_path))
+                if 'format' in probe and 'tags' in probe['format']:
+                    tags = probe['format']['tags']
+                    if 'creation_time' in tags:
+                        return datetime.strptime(tags['creation_time'].split('.')[0], "%Y-%m-%dT%H:%M:%S")
+            except Exception as e:
+                print(f"Error reading video metadata with ffmpeg: {e}")
+                
+                # Fallback to hachoir
+                try:
+                    parser = createParser(str(file_path))
+                    if parser:
+                        metadata = extractMetadata(parser)
+                        if metadata and metadata.has('creation_date'):
+                            return metadata.get('creation_date')
+                except Exception as e:
+                    print(f"Error reading video metadata with hachoir: {e}")
+    
+        # If all methods fail, use file modification time
+        return datetime.fromtimestamp(file_path.stat().st_mtime)
+
+    def find_non_media_files(self) -> dict:
+        """
+        Find files that are not images or videos and can likely be deleted.
+        Returns a dictionary of file extensions and their counts.
+        """
+        KNOWN_MEDIA_TYPES = {
+            # Images
+            '.jpg', '.jpeg', '.png', '.heic', '.tiff', '.gif', '.raw', '.arw', '.cr2', '.nef',
+            # Videos
+            '.mov', '.mp4', '.mts', '.avi', '.wmv', '.m4v', '.3gp',
+            # Common sidecar files to keep
+            '.thm', '.xmp'
+        }
+        
+        deletable_files = defaultdict(list)
+        
+        for file_path in self.src_root.rglob('*'):
+            if not file_path.is_file() or self.is_excluded_path(file_path):
+                continue
+                
+            ext = file_path.suffix.lower()
+            if ext not in KNOWN_MEDIA_TYPES:
+                deletable_files[ext].append(str(file_path))
+        
+        # Print report
+        if deletable_files:
+            print("\nPotentially deletable non-media files found:")
+            for ext, files in sorted(deletable_files.items()):
+                print(f"\n{ext}: {len(files)} files")
+                # Show first 5 examples
+                for f in files[:5]:
+                    print(f"  {f}")
+                if len(files) > 5:
+                    print(f"  ... and {len(files) - 5} more {ext} files")
+        else:
+            print("No non-media files found")
+        
+        return deletable_files
 
 # Example usage:
 converter = ImageConverter('Organized', 'Organized_jpeg')
