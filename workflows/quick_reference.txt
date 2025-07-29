@@ -1,0 +1,107 @@
+# Quick Reference: HEIC Conversion Workflow
+
+## Fast Track Workflow (Most Common Use Case)
+
+### Prerequisites
+1. Update paths in all scripts:
+   ```python
+   src_directory = r'W:\Organized'
+   dest_directory = r'W:\Convert to Jpeg'
+   archive_directory = r'W:\HEIC_Archive'
+   ```
+
+### Core Workflow (6 Steps)
+
+```bash
+# 1. Analyze your media collection
+python scripts/comprehensive_analysis.py
+
+# 2. Convert HEIC files to JPEG
+python scripts/heic_conversion.py
+
+# 3. Verify conversions worked
+python scripts/reconcile_heic_jpeg.py
+
+# 4. Archive original HEIC files
+python scripts/archive_converted_heic.py
+
+# 5. Convert other image formats (optional)
+python scripts/general_conversion.py
+
+# 6. Final verification (optional)
+python scripts/reconcile_heic_jpeg.py
+```
+
+## What Each Step Does
+
+| Step | Script | Purpose | Output |
+|------|--------|---------|--------|
+| 1 | `comprehensive_analysis.py` | Scan all media files | Analysis reports |
+| 2 | `heic_conversion.py` | Convert HEIC→JPEG | JPEG files + reports |
+| 3 | `reconcile_heic_jpeg.py` | Verify conversions | Reconciliation report |
+| 4 | `archive_converted_heic.py` | Move HEIC to archive | Clean source directory |
+| 5 | `general_conversion.py` | Convert PNG/TIFF→JPEG | More JPEG files |
+| 6 | `reconcile_heic_jpeg.py` | Final verification | Final status report |
+
+## Expected Results
+
+**Before Workflow:**
+```
+W:\Organized\
+├── IMG_1234.heic
+├── IMG_1235.png
+└── IMG_1236.tiff
+```
+
+**After Step 2 (HEIC Conversion):**
+```
+W:\Organized\          W:\Convert to Jpeg\
+├── IMG_1234.heic  →   ├── IMG_1234.jpg
+├── IMG_1235.png       └── (HEIC converted)
+└── IMG_1236.tiff
+```
+
+**After Step 4 (Archive):**
+```
+W:\Organized\          W:\Convert to Jpeg\    W:\HEIC_Archive\
+├── IMG_1235.png       ├── IMG_1234.jpg       ├── IMG_1234.heic
+└── IMG_1236.tiff      └── (HEIC converted)   └── (originals)
+```
+
+**After Step 5 (General Conversion):**
+```
+W:\Organized\          W:\Convert to Jpeg\    W:\HEIC_Archive\
+├── (empty or          ├── IMG_1234.jpg       ├── IMG_1234.heic
+│   problem files)     ├── IMG_1235.jpg       └── (originals)
+                       └── IMG_1236.jpg
+```
+
+## Key Files to Monitor
+
+- **Reports folder**: All operation logs
+- **Source directory**: Should be mostly empty after workflow
+- **Destination directory**: All your converted JPEG files
+- **Archive directory**: Original HEIC files (backup)
+
+## Common Issues & Quick Fixes
+
+| Issue | Quick Fix |
+|-------|-----------|
+| Import errors | Run from project root, activate venv |
+| Path not found | Update script paths to your directories |
+| No files converted | Check HEIC files have creation dates |
+| Permission errors | Check folder write permissions |
+
+## One-Line Status Check
+```bash
+python scripts/reconcile_heic_jpeg.py
+```
+This shows your current conversion status anytime.
+
+## Emergency Recovery
+If something goes wrong, your original HEIC files are safely stored in:
+```
+W:\HEIC_Archive\
+```
+
+Just copy them back to restore original state.
